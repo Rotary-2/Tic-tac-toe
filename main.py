@@ -82,6 +82,67 @@ def track_large_rect(blob, last_info):
     else:
         # 如果匹配失败，保持旧位置
         return last_info
+        
+def lerp(p1, p2, t):
+    """线性插值，返回p1和p2之间t比例点"""
+    return (p1[0] + (p2[0] - p1[0]) * t,
+            p1[1] + (p2[1] - p1[1]) * t)
+
+def get_3x3_grid_corners(corners):
+    """
+    corners 是大矩形4个角，顺序OpenMV保证是左上、右上、右下、左下（逆时针）
+    返回一个3x3列表，每个元素是小格子4个角点（左上、右上、右下、左下）
+    """
+    # 先计算左边边界三分点，右边边界三分点
+    left_points = [lerp(corners[0], corners[3], t) for t in [0, 1/3, 2/3, 1]]
+    right_points = [lerp(corners[1], corners[2], t) for t in [0, 1/3, 2/3, 1]]
+
+    grid_corners = []
+    for row in range(3):
+        row_points = []
+        # 每行左右边界两点
+        left_start = left_points[row]
+        left_end = left_points[row+1]
+        right_start = right_points[row]
+        right_end = right_points[row+1]
+        # 该行左边界和右边界的三分点
+        for col in range(3):
+            # 四个角点（左上、右上、右下、左下）
+            tl = lerp(left_start, right_start, col / 3)
+            tr = lerp(left_start, right_start, (col+1) / 3)
+            br = lerp(left_end, right_end, (col+1) / 3)
+            bl = lerp(left_end, right_end, col / 3)
+            row_points.append([tl, tr, br, bl])
+        grid_corners.append(row_points)
+    return grid_corners
+
+def draw_grid(img, grid_corners):
+    for row in range(3):
+        for col in range(3):
+            corners = grid_corners[row][col]
+            # 画多边形边框
+            img.draw_line(int(corners[0][0]), int(corners[0][1]), int(corners[1][0]), int(corners[1][1]), color=(0,0,255))
+            img.draw_line(int(corners[1][0]), int(corners[1][1]), int(corners[2][0]), int(corners[2][1]), color=(0,0,255))
+            img.draw_line(int(corners[2][0]), int(corners[2][1]), int(corners[3][0]), int(corners[3][1]), color=(0,0,255))
+            img.draw_line(int(corners[3][0]), int(corners[3][1]), int(corners[0][0]), int(corners[0][1]), color=(0,0,255))
+            # 计算中心点用于写编号
+            cx = int(sum([p[0] for p in corners]) / 4)
+            cy = int(sum([p[1] for p in corners]) / 4)
+            num = row * 3 + col + 1  # 从1开始编号
+            img.draw_string(cx - 5, cy - 5, str(num), color=(0,0,255), scale=2)
+            
+def sort_corners(corners):
+    # corners 是4个点列表 [(x,y), ...]
+    # 按x排序
+    corners = sorted(corners, key=lambda p: p[0])
+    left_points = corners[:2]
+    right_points = corners[2:]
+    # 左边两个按y排序，最小y为左上，最大y为左下
+    left_top, left_bottom = sorted(left_points, key=lambda p: p[1])
+    # 右边两个按y排序，最小y为右上，最大y为右下
+    right_top, right_bottom = sorted(right_points, key=lambda p: p[1])
+    return [left_top, right_top, right_bottom, left_bottom]
+
 
 while True:
     clock.tick()
@@ -152,7 +213,10 @@ while True:
             # 为简化，假设最新blob是large_black_blobs[0]
 
             if large_black_blobs:
-                corners = large_black_blobs[0].min_corners()
+                raw_corners = large_black_blobs[0].min_corners()
+                corners = sort_corners(raw_corners)
+                grid_corners = get_3x3_grid_corners(corners)
+                draw_grid(img, grid_corners)
                 img.draw_line(corners[0][0], corners[0][1], corners[1][0], corners[1][1], color=(0,0,255), thickness=2)
                 img.draw_line(corners[1][0], corners[1][1], corners[2][0], corners[2][1], color=(0,0,255), thickness=2)
                 img.draw_line(corners[2][0], corners[2][1], corners[3][0], corners[3][1], color=(0,0,255), thickness=2)
